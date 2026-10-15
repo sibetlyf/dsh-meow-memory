@@ -14,10 +14,12 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { fillTemplate, getPromptLang, keyedValue } from './prompt-loader.js'
+import { DEFAULT_RULES_MD } from './default-rules.js'
 
 export type Level = 'soul' | 'user' | 'project' | 'fact' | 'lesson' | 'topic' | 'rules'
 export type Status = 'active' | 'archived' | 'stale'
@@ -303,20 +305,48 @@ export class MemoryDb {
     }
   }
 
-  /** 幂等植入默认设计原则（如未存在）：优先创建 subagent 执行非阻塞任务。 */
+  /** 幂等植入/更新默认设计原则：主对话分流规约（intent routing）。 */
   seedDefaultRules(): void {
     try {
+      let content = DEFAULT_RULES_MD
+      // 如果插件根目录或当前工作区存在 default_mem.md，优先读取最新内容
+      const candidatePaths = [
+        join(dirname(fileURLToPath(import.meta.url)), '../default_mem.md'),
+        join(dirname(fileURLToPath(import.meta.url)), '../../default_mem.md'),
+        join(process.cwd(), 'default_mem.md'),
+        'G:\\dsh-test\\.dsh\\skills\\dsh-meow-memory\\default_mem.md',
+      ]
+      for (const p of candidatePaths) {
+        if (existsSync(p)) {
+          try {
+            content = readFileSync(p, 'utf8')
+            break
+          } catch {
+            /* 忽略读取错误 */
+          }
+        }
+      }
+
       const existing = this.db.prepare(
-        "SELECT id FROM rules WHERE content LIKE '%subagent%' LIMIT 1",
-      ).get()
+        "SELECT id, content FROM rules WHERE content LIKE '%subagent%' OR title LIKE '%分流规则%' LIMIT 1",
+      ).get() as { id: string; content: string } | undefined
+
       if (!existing) {
         this.insert({
           level: 'rules',
-          title: '异步非阻塞任务执行准则',
-          content: '遇到非阻塞任务、耗时较长的后台处理或无需打断主流程的工作，必须优先创建 subagent 执行。',
+          title: '主对话分流规则（intent routing）v4',
+          content,
           importance: 2,
           project: null,
-          keywords: ['subagent', '非阻塞', '后台任务', '子代理', '异步任务'],
+          keywords: ['subagent', '非阻塞', '后台任务', '主对话分流', 'intent routing', '零侦察', 'QUICK', 'TASK', 'CHAT', 'browser'],
+        })
+      } else if (existing.content !== content && existing.content.length < 500) {
+        // 如果是历史写入的简短旧版本，平滑升级为完整版规约
+        this.update('rules', existing.id, {
+          title: '主对话分流规则（intent routing）v4',
+          content,
+          importance: 2,
+          keywords: ['subagent', '非阻塞', '后台任务', '主对话分流', 'intent routing', '零侦察', 'QUICK', 'TASK', 'CHAT', 'browser'],
         })
       }
     } catch {
