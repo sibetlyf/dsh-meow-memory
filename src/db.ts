@@ -303,6 +303,27 @@ export class MemoryDb {
     }
   }
 
+  /** 幂等植入默认设计原则（如未存在）：优先创建 subagent 执行非阻塞任务。 */
+  seedDefaultRules(): void {
+    try {
+      const existing = this.db.prepare(
+        "SELECT id FROM rules WHERE content LIKE '%subagent%' LIMIT 1",
+      ).get()
+      if (!existing) {
+        this.insert({
+          level: 'rules',
+          title: '异步非阻塞任务执行准则',
+          content: '遇到非阻塞任务、耗时较长的后台处理或无需打断主流程的工作，必须优先创建 subagent 执行。',
+          importance: 2,
+          project: null,
+          keywords: ['subagent', '非阻塞', '后台任务', '子代理', '异步任务'],
+        })
+      }
+    } catch {
+      /* 种子数据插入失败不阻断主流程 */
+    }
+  }
+
   /** 新库（memories 全空）判定：迁移只在库刚创建时执行一次。 */
   isFresh(): boolean {
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM soul').get() as { n: number }
@@ -775,6 +796,7 @@ export function getDb(workspace: string, dir = '.dsh-meow'): MemoryDb {
   let db = dbCache.get(key)
   if (!db) {
     db = new MemoryDb(memoryDbPath(workspace, dir))
+    db.seedDefaultRules()
     dbCache.set(key, db)
   }
   return db
